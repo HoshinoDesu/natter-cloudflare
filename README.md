@@ -44,6 +44,7 @@
 ```
 A 记录:   natter-server.yourdomain.com     →  动态公网IP
 SRV 记录: _service._protocol.yourdomain.com →  natter-server.yourdomain.com:动态端口
+```
 
 ---
 
@@ -52,7 +53,7 @@ SRV 记录: _service._protocol.yourdomain.com →  natter-server.yourdomain.com:
 ### 1. 克隆项目
 
 ```bash
-git clone <your-repo-url>
+git clone https://github.com/HoshinoDesu/natter-cloudflare
 cd natter-cloudflare
 ```
 

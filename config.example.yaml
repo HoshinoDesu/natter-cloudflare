@@ -1,0 +1,48 @@
+# Natter CloudFlare SRV 自动更新器配置文件
+# 复制此文件为 config.yaml 并填入你的实际配置
+
+# ==================== CloudFlare API 配置 ====================
+cloudflare:
+  # API Token 获取方式：https://dash.cloudflare.com/profile/api-tokens
+  # 需要权限：Zone.DNS (Edit)
+  api_token: "your_cloudflare_api_token_here"
+  
+  # Zone ID 获取方式：
+  # 1. 登录 CloudFlare Dashboard
+  # 2. 选择你的域名
+  # 3. 在右侧概览页面可以看到 "Zone ID"
+  zone_id: "your_zone_id_here"
+  
+  # 你的主域名（例如：example.com）
+  domain: "example.com"
+
+# ==================== SRV 记录配置 ====================
+srv:
+  # SRV 记录名称（例如：_minecraft._tcp.example.com）
+  # 格式：_服务名._协议.域名
+  # Minecraft 服务器通常使用：_minecraft._tcp.yourdomain.com
+  name: "_minecraft._tcp.example.com"
+  
+  # SRV 优先级（0-65535，数值越小优先级越高）
+  priority: 0
+  
+  # SRV 权重（0-65535，用于负载均衡）
+  weight: 5
+
+# ==================== Natter 配置 ====================
+natter:
+  # natter.py 的路径（相对或绝对路径）
+  script: "natter.py"
+  
+  # 要映射的本地端口
+  port: 25565  # Minecraft 默认端口
+  
+  # 额外的 Natter 参数（列表格式）
+  # 例如：["-u"] 表示使用 UDP 模式
+  # 例如：["-v"] 表示详细模式
+  args: []
+
+# ==================== 其他配置 ====================
+# IP检查间隔（秒）- 检查外部IP是否变化
+# 如果检测到IP变化，将自动重启Natter并更新SRV记录
+ip_check_interval: 600  # 默认10分钟

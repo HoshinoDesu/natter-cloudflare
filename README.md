@@ -225,7 +225,7 @@ sudo systemctl start natter-cf
 
 ```
 natter-cloudflare/
-├── natter.py                  # Natter 主程序（需自行下载）
+├── natter.py                  # Natter 主程序
 ├── natter_cloudflare.py       # 本项目主脚本
 ├── config.example.yaml        # 配置文件示例
 ├── config.yaml                # 你的配置文件（需创建）

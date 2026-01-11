@@ -15,7 +15,6 @@ import subprocess
 import requests
 import signal
 import yaml
-from threading import Thread
 
 # ==================== 配置加载 ====================
 def load_config():
@@ -40,7 +39,9 @@ def load_config():
                 'port': 11451,
                 'args': []
             },
-            'ip_check_interval': 600
+            'logging': {
+                'show_srv_logs': False
+            }
         }
     
     try:
@@ -64,7 +65,7 @@ SRV_WEIGHT = config['srv']['weight']
 NATTER_SCRIPT = config['natter']['script']
 NATTER_PORT = config['natter']['port']
 NATTER_ARGS = config['natter'].get('args', [])
-IP_CHECK_INTERVAL = config.get('ip_check_interval', 600)
+SHOW_SRV_LOGS = config.get('logging', {}).get('show_srv_logs', False)
 # ===============================================
 
 
@@ -77,10 +78,7 @@ class NatterCloudFlare:
         self.a_record_id = None
         self.a_record_name = None  # A 记录的主机名
         self.running = True
-        self.external_ip = None
-        self.last_ip_check = 0
-        self.ip_check_interval = IP_CHECK_INTERVAL  # 从配置读取
-        self.need_restart = False
+        self.show_srv_logs = SHOW_SRV_LOGS
         
     def log(self, message, level="INFO"):
         """输出日志"""
@@ -106,89 +104,7 @@ class NatterCloudFlare:
         self.log(f"SRV 记录格式验证通过: {SRV_NAME}")
         return True
 
-    def get_external_ip(self):
-        """获取当前外部IP地址"""
-        # 使用中国内地的IP查询服务
-        ip_services = [
-            {
-                "url": "https://myip.ipip.net/json",
-                "parser": lambda r: r.json()["data"]["ip"]
-            },
-            {
-                "url": "https://api-ipv4.ip.sb/ip",
-                "parser": lambda r: r.text.strip()
-            },
-            {
-                "url": "http://ip.3322.net",
-                "parser": lambda r: r.text.strip()
-            },
-            {
-                "url": "https://ddns.oray.com/checkip",
-                "parser": lambda r: re.search(r'(\d+\.\d+\.\d+\.\d+)', r.text).group(1) if re.search(r'(\d+\.\d+\.\d+\.\d+)', r.text) else None
-            },
-            {
-                "url": "http://pv.sohu.com/cityjson?ie=utf-8",
-                "parser": lambda r: re.search(r'"cip":\s*"([^"]+)"', r.text).group(1) if re.search(r'"cip":\s*"([^"]+)"', r.text) else None
-            },
-            {
-                "url": "https://www.taobao.com/help/getip.php",
-                "parser": lambda r: re.search(r'"ip":\s*"([^"]+)"', r.text).group(1) if re.search(r'"ip":\s*"([^"]+)"', r.text) else None
-            }
-        ]
-        
-        for service in ip_services:
-            try:
-                response = requests.get(service["url"], timeout=5)
-                if response.status_code == 200:
-                    ip = service["parser"](response)
-                    if ip:
-                        # 验证是否为有效IP
-                        if re.match(r'^\d{1,3}\.\d{1,3}\.\d{1,3}\.\d{1,3}$', ip):
-                            return ip
-            except Exception as e:
-                self.log(f"从 {service['url']} 获取IP失败: {e}", "DEBUG")
-                continue
-        
-        return None
 
-    def check_ip_change(self):
-        """检查外部IP是否变化"""
-        current_time = time.time()
-        
-        # 检查是否到达检查间隔
-        if current_time - self.last_ip_check < self.ip_check_interval:
-            return False
-        
-        self.last_ip_check = current_time
-        self.log("正在检查外部IP是否变化...")
-        
-        new_ip = self.get_external_ip()
-        if not new_ip:
-            self.log("无法获取外部IP，跳过检查", "WARN")
-            # 计算下次检查时间
-            next_check = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_time + self.ip_check_interval))
-            self.log(f"下次IP检查时间: {next_check}")
-            return False
-        
-        if self.external_ip is None:
-            # 首次检查
-            self.external_ip = new_ip
-            self.log(f"当前外部IP: {new_ip}")
-            # 计算下次检查时间
-            next_check = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_time + self.ip_check_interval))
-            self.log(f"下次IP检查时间: {next_check}")
-            return False
-        
-        if new_ip != self.external_ip:
-            self.log(f"检测到外部IP变化: {self.external_ip} -> {new_ip}", "WARN")
-            self.external_ip = new_ip
-            return True
-        
-        self.log(f"外部IP未变化: {new_ip}")
-        # 计算下次检查时间
-        next_check = time.strftime("%Y-%m-%d %H:%M:%S", time.localtime(current_time + self.ip_check_interval))
-        self.log(f"下次IP检查时间: {next_check}")
-        return False
 
     def parse_natter_output(self, line):
         """解析 Natter 输出，提取公网 IP 和端口"""
@@ -227,11 +143,6 @@ class NatterCloudFlare:
             if not line:
                 break
             
-            # 检查是否需要重启
-            if self.need_restart:
-                self.log("检测到需要重启标志，准备重启Natter...", "WARN")
-                break
-            
             line = line.strip()
             if line:
                 print(line)  # 输出原始日志
@@ -245,23 +156,12 @@ class NatterCloudFlare:
                         self.current_ip = ip
                         self.current_port = port
                         self.update_cloudflare_srv()
-                        
-                        # 首次获取映射后，立即检查外部IP
-                        if self.external_ip is None:
-                            external_ip = self.get_external_ip()
-                            if external_ip:
-                                self.external_ip = external_ip
-                                self.log(f"当前外部IP: {external_ip}")
-                                # 显示首次IP检查时间
-                                next_check = time.strftime("%Y-%m-%d %H:%M:%S", 
-                                    time.localtime(time.time() + self.ip_check_interval))
-                                self.log(f"下次IP检查时间: {next_check}")
         
         # 检查进程是否异常退出
         if self.natter_process:
             return_code = self.natter_process.poll()
-            if return_code is not None and not self.need_restart:
-                self.log(f"Natter 进程异常退出，返回码: {return_code}", "ERROR")
+            if return_code is not None:
+                self.log(f"Natter 进程退出，返回码: {return_code}", "WARN")
 
     def get_cloudflare_headers(self):
         """获取 CloudFlare API 请求头"""
@@ -297,11 +197,11 @@ class NatterCloudFlare:
     def generate_a_record_name(self):
         """生成 A 记录的主机名"""
         # 从 SRV 名称提取域名部分
-        # 例如: _minecraft._tcp.mc.saltyfish.me -> mc.saltyfish.me
+        # 例如: _minecraft._tcp.mc.example.com -> mc.example.com
         parts = SRV_NAME.split('.', 2)
         if len(parts) >= 3:
-            domain = parts[2]  # mc.saltyfish.me
-            # 生成 A 记录名称: natter-server.mc.saltyfish.me
+            domain = parts[2]  # mc.example.com
+            # 生成 A 记录名称: natter-server.mc.example.com
             self.a_record_name = f"natter-server.{domain}"
         else:
             # 降级方案
@@ -447,17 +347,11 @@ class NatterCloudFlare:
             "ttl": 120  # 2分钟 TTL，便于快速更新
         }
         
-        self.log(f"创建 SRV 记录请求数据: {json.dumps(srv_data, indent=2)}", "DEBUG")
+        if self.show_srv_logs:
+            self.log(f"创建 SRV 记录请求数据: {json.dumps(srv_data, indent=2)}", "DEBUG")
         
         try:
             response = requests.post(url, headers=self.get_cloudflare_headers(), json=srv_data)
-            
-            # 记录响应以便调试
-            try:
-                response_data = response.json()
-                self.log(f"API 响应: {json.dumps(response_data, indent=2)}", "DEBUG")
-            except:
-                self.log(f"API 响应 (原始): {response.text}", "DEBUG")
             
             response.raise_for_status()
             data = response.json()
@@ -513,17 +407,11 @@ class NatterCloudFlare:
             "ttl": 120
         }
         
-        self.log(f"更新 SRV 记录请求数据: {json.dumps(srv_data, indent=2)}", "DEBUG")
+        if self.show_srv_logs:
+            self.log(f"更新 SRV 记录请求数据: {json.dumps(srv_data, indent=2)}", "DEBUG")
         
         try:
             response = requests.put(url, headers=self.get_cloudflare_headers(), json=srv_data)
-            
-            # 记录响应以便调试
-            try:
-                response_data = response.json()
-                self.log(f"API 响应: {json.dumps(response_data, indent=2)}", "DEBUG")
-            except:
-                self.log(f"API 响应 (原始): {response.text}", "DEBUG")
             
             response.raise_for_status()
             data = response.json()
@@ -630,26 +518,7 @@ class NatterCloudFlare:
             self.current_ip = None
             self.current_port = None
 
-    def restart_natter(self):
-        """重启 Natter 进程"""
-        self.log("=" * 50, "WARN")
-        self.log("正在重启 Natter...", "WARN")
-        self.log("=" * 50, "WARN")
-        
-        # 停止当前进程
-        self.stop_natter()
-        
-        # 等待一下
-        time.sleep(2)
-        
-        # 重新启动
-        if self.start_natter():
-            self.need_restart = False
-            self.log("Natter 重启成功")
-            return True
-        else:
-            self.log("Natter 重启失败", "ERROR")
-            return False
+
 
     def signal_handler(self, signum, frame):
         """处理退出信号"""
@@ -658,24 +527,7 @@ class NatterCloudFlare:
         self.stop_natter()
         sys.exit(0)
 
-    def ip_check_thread(self):
-        """IP检查线程"""
-        while self.running:
-            try:
-                time.sleep(30)  # 每30秒检查一次（实际检查间隔由 ip_check_interval 控制）
-                
-                if not self.running:
-                    break
-                
-                # 检查IP是否变化
-                if self.check_ip_change():
-                    self.log("外部IP已变化，将在下次循环重启Natter", "WARN")
-                    self.need_restart = True
-                    # 主动终止当前进程以触发重启
-                    if self.natter_process:
-                        self.natter_process.terminate()
-            except Exception as e:
-                self.log(f"IP检查线程出错: {e}", "ERROR")
+
 
     def run(self):
         """主运行函数"""
@@ -688,19 +540,14 @@ class NatterCloudFlare:
         self.log("=" * 50)
         self.log(f"目标域名: {SRV_NAME}")
         self.log(f"映射端口: {NATTER_PORT}")
-        self.log(f"IP检查间隔: {self.ip_check_interval}秒 ({self.ip_check_interval//60}分钟)")
+        self.log("注意: IP 变化检测由 Natter 自动处理")
         
         # 验证 SRV 名称格式
         if not self.validate_srv_name():
             self.log("配置验证失败，请检查 SRV 记录名称格式", "ERROR")
             return
         
-        # 启动IP检查线程
-        ip_thread = Thread(target=self.ip_check_thread, daemon=True)
-        ip_thread.start()
-        self.log("IP监控线程已启动")
-        
-        # 主循环 - 支持自动重启
+        # 主循环 - Natter 会自动处理 IP 变化和重启
         while self.running:
             # 启动 Natter
             if not self.start_natter():
@@ -714,16 +561,10 @@ class NatterCloudFlare:
             except Exception as e:
                 self.log(f"监控过程出错: {e}", "ERROR")
             
-            # 检查是否需要重启
-            if self.need_restart and self.running:
-                self.restart_natter()
-                continue
-            elif not self.running:
-                break
-            else:
-                # 如果不是主动重启，说明进程异常退出
-                self.log("Natter 异常退出，10秒后重启...", "WARN")
-                time.sleep(10)
+            # 如果进程退出且仍在运行状态，说明 Natter 自动重启了
+            if self.running:
+                self.log("Natter 重新启动中（可能检测到 IP 变化）...", "INFO")
+                time.sleep(5)
         
         self.stop_natter()
 

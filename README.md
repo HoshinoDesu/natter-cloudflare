@@ -85,7 +85,7 @@ copy config.example.yaml config.yaml
 cp config.example.yaml config.yaml
 ```
 
-编辑 `config.yaml`：
+参考注释编辑 `config.yaml`
 
 
 ### 5. 运行脚本

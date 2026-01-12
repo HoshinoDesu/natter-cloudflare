@@ -87,24 +87,6 @@ cp config.example.yaml config.yaml
 
 编辑 `config.yaml`：
 
-```yaml
-cloudflare:
-  api_token: "your_cloudflare_api_token_here"
-  zone_id: "your_zone_id_here"
-  domain: "example.com"
-
-srv:
-  name: "_minecraft._tcp.mc.example.com"
-  priority: 0
-  weight: 5
-
-natter:
-  script: "natter.py"
-  port: 25565
-  args: []
-
-ip_check_interval: 600  # 10分钟
-```
 
 ### 5. 运行脚本
 

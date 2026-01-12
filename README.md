@@ -134,16 +134,6 @@ nohup python3 natter_cloudflare.py > natter.log 2>&1 &
 
 ## 高级配置
 
-### 自定义IP检查间隔
-
-```yaml
-# 5分钟检查一次
-ip_check_interval: 300
-
-# 15分钟检查一次
-ip_check_interval: 900
-```
-
 ### Natter 高级参数
 
 ```yaml
